@@ -1,0 +1,5 @@
+# !/bin/sh
+
+sed -i '/88\s\+openthread/d' /etc/iproute2/rt_tables
+echo "88 openthread" >> /etc/iproute2/rt_tables
+   

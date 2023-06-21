@@ -1,0 +1,328 @@
+name: otbr-snap 
+version: "0.1"
+summary: Attempt to snap otbr 
+description: |
+  OTBR is openthread implementation of Thread Border Router specs as described in Thread specs 
+  Limitations-: Work with fixed thread interface wpan0 
+confinement: strict 
+base: core22
+grade: stable
+license: Apache-2.0 #not sure whether this is right
+architectures:
+  - build-on: amd64
+    build-for: amd64
+  - build-on: arm64
+    build-for: arm64
+assumes:
+  - snapd2.46
+#I am hard coding the wpan0 interface which many not be right way    
+slots:
+  dbus-otbr-interface:
+    interface: dbus
+    bus: system
+    name: io.openthread.BorderRouter.wpan0
+plugs:
+  serial10:
+    interface: serial-port
+  etc-iproute2-rttables:
+    interface: system-files
+    write:
+      - /etc/iproute2/rt_tables
+environment:
+   INFRA_IF_NAME: wlan0
+
+apps:
+  ot-ctl:
+    command: sbin/ot-ctl
+  otbr-firewall:
+    command: bin/otbr-firewall-start.sh
+    daemon: simple 
+    restart-condition: on-failure 
+    restart-delay: 10s
+      #command to be executed when daemon exits stop-command: bin/otbr-firewall-stop.sh
+    plugs:
+      #- network-bind
+     #- netlink-connector
+     - network-control
+     - firewall-control  
+  otbr-agent:
+    #command: bin/otbr-agent.sh
+    command: bin/avahi-client.sh
+    daemon: simple
+    restart-condition: always
+    restart-delay: 10s
+    after: 
+      - otbr-firewall
+    slots:
+     - dbus-otbr-interface
+    plugs:
+     - network-bind
+     - serial10  
+     - network 
+     - network-control  
+     - firewall-control 
+     - avahi-observe
+     - avahi-control  
+  otbr-web:
+    command: sbin/otbr-web
+    daemon: simple
+    restart-condition: always
+    after: [otbr-agent]
+    plugs:
+     - network-bind
+     - network  
+       #avahi-test-client:
+       #command: bin/avahi-client.sh
+       #daemon: notify
+       #restart-condition: on-failure 
+       #restart-delay: 10s
+       #plugs:
+       #- avahi-control
+       #- daemon-notify  
+parts:
+  #mDNS-responder:
+    #source: https://github.com/apple-oss-distributions/mDNSResponder.git
+    #tag: mDNSResponder-1310.80.1
+    #build-environment:
+      #- os: linux
+    #plugin: make
+      #- make-parameters: ["-C mDNSPosix"]
+  #override-build: |
+    #set +u	
+    #sed -i '/#include <ctype.h>/a #include <stdarg.h>' Clients/dns-sd.c
+    #sed -i '/#include <ctype.h>/a #include <sys/param.h>' Clients/dns-sd.c
+    #snapcraftctl build
+  avahi-test-client:
+    source: . 
+    plugin: nil
+    after: [otbr-agent]  
+    override-build: |
+      gcc -o avahi-client avahi-cli/client-test.c -lavahi-client -lavahi-common 
+      cp avahi-client $SNAPCRAFT_PART_INSTALL
+      tee $SNAPCRAFT_PART_INSTALL/avahi-client.sh <<EOF
+      #!/bin/sh
+      while true; do
+      \$SNAP/bin/avahi-client
+      if [ \$? -eq 0 ];then
+        break
+      fi
+      sleep 2
+      done
+      echo "avahi testing finished....."
+      \$SNAP/bin/otbr-agent.sh
+      exit 0
+      EOF
+      chmod 777 $SNAPCRAFT_PART_INSTALL/avahi-client.sh
+    build-packages:
+      - libavahi-common-dev
+      - libavahi-client-dev
+      - libsystemd-dev  
+    stage-packages:
+      - libavahi-common3
+      - libavahi-client3
+    organize:
+      avahi-client: bin/avahi-client
+      avahi-client.sh: bin/avahi-client.sh  
+  otbr-firewall:
+    source: .
+    plugin: nil
+    override-build: |
+      cat << EOF > otbr-firewall-stop.sh
+      #!/bin/sh
+      echo "At the beginning...otbr-firewall-stop"
+      while ip6tables -C FORWARD -o wpan0 -j OTBR_FORWARD_INGRESS; do
+        ip6tables -D FORWARD -o wpan0 -j OTBR_FORWARD_INGRESS
+      done
+      if ip6tables -L OTBR_FORWARD_INGRESS; then
+        ip6tables -w -F OTBR_FORWARD_INGRESS
+        ip6tables -w -X OTBR_FORWARD_INGRESS
+      fi
+      if ipset list otbr-ingress-deny-src; then
+        ipset destroy otbr-ingress-deny-src
+      fi
+      if ipset list otbr-ingress-deny-src-swap; then
+        ipset destroy otbr-ingress-deny-src-swap
+      fi
+      if ipset list otbr-ingress-allow-dst; then
+        ipset destroy otbr-ingress-allow-dst
+      fi
+      if ipset list otbr-ingress-allow-dst-swap; then
+        ipset destroy otbr-ingress-allow-dst-swap
+      fi
+      echo "Reached the end...otbr-firewall-stop"
+      EOF
+      chmod 777 otbr-firewall-stop.sh
+      cat << EOF > otbr-firewall-start.sh
+      #!/bin/sh
+      \$SNAP/bin/otbr-firewall-stop.sh
+      echo "At the beginning...otbr-firewall-start"
+      ipset create -exist otbr-ingress-deny-src hash:net family inet6
+      if [ \$? -ne 0 ]; then
+        echo "ipset::$?"
+        exit 1
+      fi
+      ipset create -exist otbr-ingress-deny-src-swap hash:net family inet6
+      ipset create -exist otbr-ingress-allow-dst hash:net family inet6
+      ipset create -exist otbr-ingress-allow-dst-swap hash:net family inet6
+      ip6tables -N OTBR_FORWARD_INGRESS
+      ip6tables -I FORWARD 1 -o wpan0 -j OTBR_FORWARD_INGRESS
+      ip6tables -A OTBR_FORWARD_INGRESS -m pkttype --pkt-type unicast -i wpan0 -j DROP
+      ip6tables -A OTBR_FORWARD_INGRESS -m set --match-set otbr-ingress-deny-src src -j DROP
+      ip6tables -A OTBR_FORWARD_INGRESS -m set --match-set otbr-ingress-allow-dst dst -j ACCEPT
+      ip6tables -A OTBR_FORWARD_INGRESS -m pkttype --pkt-type unicast  -j DROP
+      ip6tables -A OTBR_FORWARD_INGRESS -j ACCEPT
+      echo "Reached the end...otbr-firewall-start"
+      exit 0
+      EOF
+      chmod 777 otbr-firewall-start.sh
+      cp otbr-firewall-start.sh otbr-firewall-stop.sh $SNAPCRAFT_PART_INSTALL/
+    organize:
+      otbr-firewall-start.sh: bin/
+      otbr-firewall-stop.sh: bin/
+  otbr-agent:
+    source: https://github.com/openthread/ot-br-posix.git #connectedhomeip 
+    source-type: git
+    source-depth: 1
+    plugin: nil 
+    build-environment:
+      #- INFRA_IF_NAME: wlp1s0
+      - INFRA_IF_NAME: wlan0
+      - OTBR_MDNS: avahi
+    override-pull: |
+      snapcraftctl pull
+      git pull --unshallow
+      git checkout a892bf7
+      git submodule update --init --recursive --depth 1 || true 
+      echo "just do nothing"
+    override-build: |
+      snapcraftctl build
+      sed -i '/dirname/d' ./script/_initrc	
+      sed -i '/^export .*BUILD_DIR=/a export BUILD_DIR=\"${SNAPCRAFT_PART_BUILD}\"' ./script/_initrc	
+      source ./script/_initrc
+
+      #changes related to otbr-agent service build
+      export OTBR_OPTIONS="-DCMAKE_INSTALL_LIBDIR=${SNAPCRAFT_PART_INSTALL}/lib/ -DOTBR_SYSTEMD_UNIT_DIR=${SNAPCRAFT_PART_INSTALL}/etc/systemd/system -DCMAKE_INSTALL_SYSCONFDIR=${SNAPCRAFT_PART_INSTALL}/etc/ -DCMAKE_BUILD_TYPE=Debug -DOT_CFLAGS=-DOPENTHREAD_POSIX_CONFIG_DAEMON_SOCKET_BASENAME=\"/tmp/openthread-%s\""
+      sed -i '/sudo ninja install/a return' ./script/_otbr
+      sed -i 's/\"-DCMAKE_INSTALL_PREFIX=.*\"/\"-DCMAKE_INSTALL_PREFIX=\${SNAPCRAFT_PART_INSTALL}\"/g' ./script/_otbr
+      #sed -i 's/\"-DOTBR_SYSTEMD_UNIT_DIR=.*\"/\"-DOTBR_SYSTEMD_UNIT_DIR=\${SNAPCRAFT_PART_INSTALL}\/etc\/systemd\/system\"/g' script/_otbr
+      sed -i '/pkg_check_modules(SYSTEMD systemd)/a set(SYSTEMD_FOUND FALSE)' $SNAPCRAFT_PART_BUILD/CMakeLists.txt
+
+      #changes related to nat64 service build
+      sed -i 's/NAT44_SERVICE=/NAT44_SERVICE=${SNAPCRAFT_PART_INSTALL}/g' ./script/_nat64
+      sed -i 's/sudo systemctl enable otbr-nat44/\#sudo systemctl enable otbr-nat44/g' ./script/_nat64
+      sed -i 's/sudo systemctl start otbr-nat44/\#sudo systemctl start otbr-nat44/g' ./script/_nat64
+      sed -i '/\#sudo systemctl start otbr-nat44/a \:' ./script/_nat64
+      sed -i 's/\$WLAN_IFNAMES/\\\$INFRA_IF_NAME/g' ./script/_nat64
+      source ./script/_nat64
+      source ./script/_otbr
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/etc/init.d
+      #get data out of default as environment vars for service command line	
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/etc/default || true
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/lib/systemd/system || true
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/etc/dbus-1/system.d/ || true
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/etc/systemd/system/ || true
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/usr/share/man || true
+      mkdir ${SNAPCRAFT_PART_INSTALL}/usr/sbin || true
+      mkdir ${SNAPCRAFT_PART_INSTALL}/usr/bin || true
+      mkdir ${SNAPCRAFT_PART_INSTALL}/usr/lib || true
+
+      nat64_install
+      otbr_install 
+      cp ${SNAPCRAFT_PART_INSTALL}/etc/default/otbr-agent $SNAPCRAFT_STAGE/otbr-agent.sh
+      #chmod 777  $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
+    build-packages:
+      - build-essential 
+      - ninja-build 
+      - cmake
+      - libcpputest-dev
+      - libdbus-1-dev
+      - libavahi-client-dev
+      - libavahi-common-dev
+      - libboost-dev
+      - libboost-filesystem-dev
+      - libboost-system-dev
+      - libjsoncpp-dev
+      - libnode72  
+    stage-packages:
+      - iproute2
+      - iputils-ping 
+      - libreadline-dev 
+      - libncurses-dev
+      - rsyslog
+      - bind9
+      - resolvconf
+      - radvd
+      - dnsutils
+      - libnetfilter-queue1
+      - libprotobuf-dev 
+      - protobuf-compiler
+      - ipset
+      - nodejs
+      - npm
+    stage:
+      - -usr/share/man
+  dummy-otbr-agent:
+    source: .
+    plugin: nil
+    after: [otbr-agent]
+    override-build: |
+      #enable ipforwarding
+      cat << EOF > otbr-agent.sh 
+      #sed -i '1i #!/bin/sh' $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
+      #!/bin/sh
+      sysctl -w net.ipv6.conf.all.forwarding=1
+      sysctl -w net.ipv4.ip_forward=1
+      sysctl net.core.optmem_max=65536
+      #set border router advertisement params
+      sysctl -w net.ipv6.conf.\$INFRA_IF_NAME.accept_ra=2
+      sysctl -w net.ipv6.conf.\$INFRA_IF_NAME.accept_ra_rt_info_max_plen=64
+      #nat64 service init' $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
+      \$SNAP/etc/init.d/otbr-nat44 start 
+      sleep 2
+      ipset list 
+      if [ \$? -ne 0 ];then
+        echo "... ipset list failed..."
+        exit 1
+      fi
+      #checking whether rule exist in POSROTING chain in nat table
+      iptables -t nat -C POSTROUTING -s "192.168.255.0/24" -j MASQUERADE
+      if [ \$? -ne 0 ];then
+        echo "... iptables list POSTROUTING failed..."
+        exit 1
+      fi
+      EOF
+      chmod 777 otbr-agent.sh
+      cp otbr-agent.sh $SNAPCRAFT_PART_INSTALL/
+      cat $SNAPCRAFT_STAGE/etc/default/otbr-agent >> $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
+      sed -i '/^OTBR_AGENT_OPTS/c OTBR_AGENT_OPTS=\"-I wpan0 -B \$INFRA_IF_NAME spinel+hdlc+uart:\/\/\/dev\/ttyACM0\?uart-baudrate=1000000 trel:\/\/\$INFRA_IF_NAME\"' $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
+      sed -i '$a \$SNAP/sbin/otbr-agent \$OTBR_AGENT_OPTS' $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
+      #rm -f $SNAPCRAFT_STAGE/otbr-agent.sh  
+    organize:
+      otbr-agent.sh: bin/otbr-agent.sh
+layout:
+  /var/lib/thread:
+    bind: $SNAP_DATA/var/lib/thread
+hooks:
+  connect-plug-etc-iproute2-rttables:
+    plugs:
+      - etc-iproute2-rttables 
+#    organize:
+#      chip-tool: bin/chip-tool  
+#apps:
+#  chip-tool:
+#    command: bin/chip-tool
+#    plugs:
+#      - network
+#      - bluez
+#    environment:
+#      TMPDIR: "/mnt"
+#slots:
+#  exec-slot:
+#    interface: content
+#    content:  executables
+#    read:
+#      - $SNAP/bin
+#
+#layout:
+#  /mnt:
+#    bind: $SNAP_DATA/mnt
