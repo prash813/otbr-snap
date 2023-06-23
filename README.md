@@ -15,8 +15,7 @@ This is an attempt to snap Open Thread Border router
  snap install avahi
  snap install bluez
  snap install otbr-snap_0.1_arm64.snap --dangerous
- 
- ```
+  ```
 
 # bluez connections
 
