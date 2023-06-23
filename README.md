@@ -4,6 +4,7 @@ This is an attempt to snap Open Thread Border router
 # Building 
 - Snap currently only builds for arm64 platform. But building for other other architectures should no be big issue.
 - Use following command build the snap . Please note that cross compilation is not tested.
+  
   ```
    snapcraft --destructive-mode
   ```
@@ -14,14 +15,18 @@ This is an attempt to snap Open Thread Border router
  snap install avahi
  snap install bluez
  snap install otbr-snap_0.1_arm64.snap --dangerous
+ 
  ```
- # bluez connections
+
+# bluez connections
+
 ```
  snap connect bluez:home
  snap connect bluez:network-control
  snap bluez:uinput
 ```
 # otbr-snap connections 
+
 ```
 snap connect otbr-snap:firewall-control
 snap connect otbr-snap:network-control
@@ -41,3 +46,5 @@ https://github.com/prash813/matter-otbr/blob/main/README.md
 # Testing on RPi
 testing on RPi might need pi-bluetooth snap.
 
+# TODO-:
+Rewriteing this guide.
