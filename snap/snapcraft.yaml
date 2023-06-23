@@ -62,7 +62,8 @@ apps:
      - network-control  
      - firewall-control 
      - avahi-observe
-     - avahi-control  
+     - avahi-control
+     - raw-usb  
   otbr-web:
     command: sbin/otbr-web
     daemon: simple
@@ -270,6 +271,13 @@ parts:
       cat << EOF > otbr-agent.sh 
       #sed -i '1i #!/bin/sh' $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
       #!/bin/sh
+      export VAR="\$(snapctl get infra-iface)"
+      if [ -z "\$VAR" ];then
+        echo "Def....\$INFRA_IF_NAME...Def"
+      else
+        INFRA_IF_NAME=\$VAR
+        echo "CHANGED....\$INFRA_IF_NAME...CHANGED"
+      fi  
       sysctl -w net.ipv6.conf.all.forwarding=1
       sysctl -w net.ipv4.ip_forward=1
       sysctl net.core.optmem_max=65536

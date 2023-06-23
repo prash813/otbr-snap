@@ -1,0 +1,21 @@
+# !/bin/sh
+VAR="$(snapctl get infra-iface)"
+#echo $VAR &> $SNAP_COMMON/configure.log.txt
+#if [ -z "$VAR"  ]; then
+#echo "hi" > $SNAP_COMMON/configure.log.txt
+#export INFRA_IF_NAME="wlan0"
+#else
+#echo "hie" > $SNAP_COMMON/configure.log.txt
+#export INFRA_IF_NAME=$VAR
+#snapctl stop $SNAP_INSTANCE_NAME.otbr-agent || true
+#sleep 1
+#snapctl start $SNAP_INSTANCE_NAME.otbr-agent || true
+#fi
+if [ "$VAR" != "wlan0" ];then
+echo "Restarting the otbr-agent" > $SNAP_COMMON/configure.log.txt
+snapctl stop $SNAP_INSTANCE_NAME.otbr-agent
+sleep 1
+snapctl start $SNAP_INSTANCE_NAME.otbr-agent
+fi
+export INFRA_IF_NAME=$VAR
+echo $INFRA_IF_NAME   > $SNAP_COMMON/configure.log.txt
