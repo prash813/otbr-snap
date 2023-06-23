@@ -32,6 +32,7 @@ snap connect otbr-snap:network-control
 snap connect otbr-snap:avahi-observe avahi:avahi-observe
 snap connect otbr-snap:avahi-control avahi:avahi-control
 snap connect otbr-snap:etc-iproute2-rttables
+snap connect otbr-snap:raw-usb
 snap set otbr-snap infra-iface=<name of net interface>
 ```
 # Testing
