@@ -11,11 +11,12 @@ This is an attempt to snap Open Thread Border router
 # Running snap on arm64 board
 - Need to have atleast one IPv4/IPv6 compatible network interface
   
-```
- snap install avahi
- snap install bluez
- snap install otbr-snap_0.1_arm64.snap --dangerous
-```
+  ```
+   snap install avahi
+   snap install bluez
+   snap install otbr-snap_0.1_arm64.snap --dangerous
+  ```
+
 
 # bluez connections
 
