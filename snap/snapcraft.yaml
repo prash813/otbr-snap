@@ -27,7 +27,7 @@ plugs:
   etc-iproute2-rttables:
     interface: system-files
     write:
-      - /etc/iproute2/rt_tables
+      - /etc/iproute2
 environment:
    INFRA_IF_NAME: wlan0
 
@@ -229,8 +229,10 @@ parts:
 
       nat64_install
       otbr_install 
-      cp ${SNAPCRAFT_PART_INSTALL}/etc/default/otbr-agent $SNAPCRAFT_STAGE/otbr-agent.sh
+      #cp ${SNAPCRAFT_PART_INSTALL}/etc/default/otbr-agent $SNAPCRAFT_STAGE/otbr-agent.sh
       #chmod 777  $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
+      sed -i '/init-functions/s/^/#/' $SNAPCRAFT_PART_INSTALL/etc/init.d/otbr-nat44
+      sed -i '/vars.sh/s/^/#/' $SNAPCRAFT_PART_INSTALL/etc/init.d/otbr-nat44
     build-packages:
       - build-essential 
       - ninja-build 
@@ -268,6 +270,8 @@ parts:
     after: [otbr-agent]
     override-build: |
       #enable ipforwarding
+      #edit otbr-nat44 file a bit
+      set +e
       cat << EOF > otbr-agent.sh 
       #sed -i '1i #!/bin/sh' $SNAPCRAFT_PART_INSTALL/bin/otbr-agent.sh
       #!/bin/sh
@@ -304,7 +308,7 @@ parts:
       cat $SNAPCRAFT_STAGE/etc/default/otbr-agent >> $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
       sed -i '/^OTBR_AGENT_OPTS/c OTBR_AGENT_OPTS=\"-I wpan0 -B \$INFRA_IF_NAME spinel+hdlc+uart:\/\/\/dev\/ttyACM0\?uart-baudrate=1000000 trel:\/\/\$INFRA_IF_NAME\"' $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
       sed -i '$a \$SNAP/sbin/otbr-agent \$OTBR_AGENT_OPTS' $SNAPCRAFT_PART_INSTALL/otbr-agent.sh
-      #rm -f $SNAPCRAFT_STAGE/otbr-agent.sh  
+      #rm -f $SNAPCRAFT_STAGE/otbr-agent.sh
     organize:
       otbr-agent.sh: bin/otbr-agent.sh
 layout:
